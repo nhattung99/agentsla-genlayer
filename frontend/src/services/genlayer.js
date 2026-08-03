@@ -2,9 +2,9 @@ import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
 
 export const CONTRACT_ADDRESSES = {
-  slaCourt: import.meta.env.VITE_CONTRACT_SLA_COURT || '',
-  treasury: import.meta.env.VITE_CONTRACT_TREASURY || '',
-  reputation: import.meta.env.VITE_CONTRACT_REPUTATION || ''
+  slaCourt: import.meta.env.VITE_CONTRACT_ADDRESS || import.meta.env.VITE_CONTRACT_SLA_COURT || '0x7fab008Bb711E3e8eF7d34182D1A235f63407E8f',
+  treasury: import.meta.env.VITE_CONTRACT_TREASURY || '0x3FE2E18a4B139520A68E4236A5da58A32B0aAadB',
+  reputation: import.meta.env.VITE_CONTRACT_REPUTATION || '0xB3814Ec61b8662cAC514f9dEFf4b938C08E89cF7'
 };
 
 export function isContractConfigured() {
@@ -16,43 +16,115 @@ export async function connectWallet() {
     throw new Error('MetaMask or Web3 Wallet not detected in browser');
   }
 
+  const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+  const userAddress = accounts[0];
+
+  // Auto-switch / add studionet network
   try {
-    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-    const userAddress = accounts[0];
-
-    // Auto-switch / add studionet network
-    try {
-      await window.ethereum.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: `0x${studionet.id.toString(16)}` }]
-      });
-    } catch (switchError) {
-      if (switchError.code === 4902) {
-        await window.ethereum.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: `0x${studionet.id.toString(16)}`,
-            chainName: studionet.name,
-            rpcUrls: [studionet.rpcUrls.default.http[0]],
-            nativeCurrency: studionet.nativeCurrency
-          }]
-        });
-      }
-    }
-
-    const client = createClient({
-      chain: studionet,
-      account: userAddress
+    await window.ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: `0x${studionet.id.toString(16)}` }]
     });
-
-    return { userAddress, client };
-  } catch (err) {
-    console.error('Wallet connection failed:', err);
-    throw err;
+  } catch (switchError) {
+    if (switchError.code === 4902) {
+      await window.ethereum.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: `0x${studionet.id.toString(16)}`,
+          chainName: studionet.name,
+          rpcUrls: [studionet.rpcUrls.default.http[0]],
+          nativeCurrency: studionet.nativeCurrency
+        }]
+      });
+    }
   }
+
+  const client = createClient({
+    chain: studionet,
+    account: userAddress
+  });
+
+  return { userAddress, client };
 }
 
-// Sample fallback SLA dataset when contract is unconfigured
+// Write Contract functions triggering MetaMask transaction signature prompt
+export async function createAgreementContract(client, { provider, task_description, criteria, payment_amount, deadline }) {
+  if (!client) throw new Error('Please connect your MetaMask wallet first.');
+  
+  const txHash = await client.writeContract({
+    address: CONTRACT_ADDRESSES.slaCourt,
+    functionName: 'create_agreement',
+    args: [provider, task_description, criteria, BigInt(payment_amount), BigInt(deadline)],
+    value: BigInt(payment_amount)
+  });
+
+  if (client.waitForTransactionReceipt) {
+    await client.waitForTransactionReceipt({ hash: txHash });
+  }
+  return txHash;
+}
+
+export async function submitDeliverableContract(client, { agreement_id, deliverable_urls, reference_urls }) {
+  if (!client) throw new Error('Please connect your MetaMask wallet first.');
+
+  const txHash = await client.writeContract({
+    address: CONTRACT_ADDRESSES.slaCourt,
+    functionName: 'submit_deliverable',
+    args: [agreement_id, deliverable_urls, reference_urls]
+  });
+
+  if (client.waitForTransactionReceipt) {
+    await client.waitForTransactionReceipt({ hash: txHash });
+  }
+  return txHash;
+}
+
+export async function resolveAgreementContract(client, agreement_id) {
+  if (!client) throw new Error('Please connect your MetaMask wallet first.');
+
+  const txHash = await client.writeContract({
+    address: CONTRACT_ADDRESSES.slaCourt,
+    functionName: 'resolve_agreement',
+    args: [agreement_id]
+  });
+
+  if (client.waitForTransactionReceipt) {
+    await client.waitForTransactionReceipt({ hash: txHash });
+  }
+  return txHash;
+}
+
+export async function submitDisputeEvidenceContract(client, agreement_id, evidence_urls) {
+  if (!client) throw new Error('Please connect your MetaMask wallet first.');
+
+  const txHash = await client.writeContract({
+    address: CONTRACT_ADDRESSES.slaCourt,
+    functionName: 'submit_dispute_evidence',
+    args: [agreement_id, evidence_urls]
+  });
+
+  if (client.waitForTransactionReceipt) {
+    await client.waitForTransactionReceipt({ hash: txHash });
+  }
+  return txHash;
+}
+
+export async function acceptDisputedVerdictContract(client, agreement_id) {
+  if (!client) throw new Error('Please connect your MetaMask wallet first.');
+
+  const txHash = await client.writeContract({
+    address: CONTRACT_ADDRESSES.slaCourt,
+    functionName: 'client_accept_disputed_verdict',
+    args: [agreement_id]
+  });
+
+  if (client.waitForTransactionReceipt) {
+    await client.waitForTransactionReceipt({ hash: txHash });
+  }
+  return txHash;
+}
+
+// Sample fallback SLA dataset when contract is unconfigured or reading offline
 export const SAMPLE_AGREEMENTS = [
   {
     id: "0",

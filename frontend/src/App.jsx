@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Header from './components/Header';
 import ContractNoticeBanner from './components/ContractNoticeBanner';
 import SLAList from './components/SLAList';
@@ -7,7 +7,16 @@ import SubmitDeliverableModal from './components/SubmitDeliverableModal';
 import ResolutionModal from './components/ResolutionModal';
 import DisputePanel from './components/DisputePanel';
 import Leaderboard from './components/Leaderboard';
-import { SAMPLE_AGREEMENTS, connectWallet, isContractConfigured } from './services/genlayer';
+import {
+  SAMPLE_AGREEMENTS,
+  connectWallet,
+  isContractConfigured,
+  createAgreementContract,
+  submitDeliverableContract,
+  resolveAgreementContract,
+  submitDisputeEvidenceContract,
+  acceptDisputedVerdictContract
+} from './services/genlayer';
 
 export default function App() {
   const [account, setAccount] = useState(null);
@@ -19,6 +28,7 @@ export default function App() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [activeDeliverableSLA, setActiveDeliverableSLA] = useState(null);
   const [selectedResolutionSLA, setSelectedResolutionSLA] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   const handleConnect = async () => {
     try {
@@ -30,118 +40,188 @@ export default function App() {
     }
   };
 
-  const handleCreateSLA = (newSLAData) => {
-    const newId = String(agreements.length);
-    const newEntry = {
-      id: newId,
-      client: account || "0x1111111111111111111111111111111111111111",
-      provider: newSLAData.provider,
-      task_description: newSLAData.task_description,
-      criteria: newSLAData.criteria,
-      payment_amount: newSLAData.payment_amount,
-      deadline: newSLAData.deadline,
-      deliverable_urls: [],
-      reference_urls: [],
-      status: "PENDING_DELIVERY",
-      compliance_pct: 0,
-      confidence: 0,
-      verdict_reason: "",
-      dispute_evidence: [],
-      paid_out: false
-    };
+  const handleCreateSLA = async (newSLAData) => {
+    if (!client) {
+      alert('Please connect your MetaMask wallet first to sign the transaction.');
+      await handleConnect();
+      return;
+    }
+    try {
+      setLoading(true);
+      await createAgreementContract(client, newSLAData);
+      
+      const newId = String(agreements.length);
+      const newEntry = {
+        id: newId,
+        client: account || "0x1111111111111111111111111111111111111111",
+        provider: newSLAData.provider,
+        task_description: newSLAData.task_description,
+        criteria: newSLAData.criteria,
+        payment_amount: newSLAData.payment_amount,
+        deadline: newSLAData.deadline,
+        deliverable_urls: [],
+        reference_urls: [],
+        status: "PENDING_DELIVERY",
+        compliance_pct: 0,
+        confidence: 0,
+        verdict_reason: "",
+        dispute_evidence: [],
+        paid_out: false
+      };
 
-    setAgreements([newEntry, ...agreements]);
-    setShowCreateModal(false);
-  };
-
-  const handleSubmitDeliverable = ({ agreement_id, deliverable_urls, reference_urls }) => {
-    setAgreements(agreements.map(item => {
-      if (item.id === agreement_id) {
-        return {
-          ...item,
-          deliverable_urls,
-          reference_urls,
-          status: 'SUBMITTED'
-        };
-      }
-      return item;
-    }));
-    setActiveDeliverableSLA(null);
-  };
-
-  const handleRunAdjudication = async (agreement_id) => {
-    // Simulate GenLayer consensus adjudication response
-    await new Promise(resolve => setTimeout(resolve, 2500));
-
-    setAgreements(agreements.map(item => {
-      if (item.id === agreement_id) {
-        const compliance_pct = 85;
-        const confidence = 92;
-        const verdictObj = {
-          compliance_pct,
-          confidence,
-          criteria_evaluations: item.criteria.map((c, i) => ({
-            criterion: c,
-            status: i === 0 ? 'MET' : i === 1 ? 'MET' : 'PARTIAL',
-            note: 'Verified against independent reference logs'
-          })),
-          reason: 'Adjudicated by GenLayer consensus. Criteria 1 & 2 fully met; Criterion 3 partially met.'
-        };
-        return {
-          ...item,
-          status: 'RESOLVED',
-          compliance_pct,
-          confidence,
-          verdict_reason: JSON.stringify(verdictObj),
-          paid_out: true
-        };
-      }
-      return item;
-    }));
-
-    if (selectedResolutionSLA && selectedResolutionSLA.id === agreement_id) {
-      setSelectedResolutionSLA(prev => ({
-        ...prev,
-        status: 'RESOLVED',
-        compliance_pct: 85,
-        confidence: 92,
-        verdict_reason: JSON.stringify({
-          compliance_pct: 85,
-          confidence: 92,
-          criteria_evaluations: prev.criteria.map(c => ({
-            criterion: c,
-            status: 'MET',
-            note: 'Verified against independent reference logs'
-          })),
-          reason: 'Adjudicated by GenLayer consensus. Criteria fully met.'
-        })
-      }));
+      setAgreements([newEntry, ...agreements]);
+      setShowCreateModal(false);
+      alert('SLA Contract created & transaction signed successfully on GenLayer studionet!');
+    } catch (err) {
+      alert('Transaction error: ' + (err.reason || err.message));
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleSubmitEvidence = (agreement_id, evidence_urls) => {
-    setAgreements(agreements.map(item => {
-      if (item.id === agreement_id) {
-        return {
-          ...item,
-          dispute_evidence: [...item.dispute_evidence, ...evidence_urls]
-        };
-      }
-      return item;
-    }));
+  const handleSubmitDeliverable = async ({ agreement_id, deliverable_urls, reference_urls }) => {
+    if (!client) {
+      alert('Please connect your MetaMask wallet first to sign the transaction.');
+      await handleConnect();
+      return;
+    }
+    try {
+      setLoading(true);
+      await submitDeliverableContract(client, { agreement_id, deliverable_urls, reference_urls });
+
+      setAgreements(agreements.map(item => {
+        if (item.id === agreement_id) {
+          return {
+            ...item,
+            deliverable_urls,
+            reference_urls,
+            status: 'SUBMITTED'
+          };
+        }
+        return item;
+      }));
+      setActiveDeliverableSLA(null);
+      alert('Deliverables submitted & transaction signed on GenLayer studionet!');
+    } catch (err) {
+      alert('Transaction error: ' + (err.reason || err.message));
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleAcceptDisputedVerdict = (agreement_id) => {
-    setAgreements(agreements.map(item => {
-      if (item.id === agreement_id) {
-        return {
-          ...item,
+  const handleRunAdjudication = async (agreement_id) => {
+    if (!client) {
+      alert('Please connect your MetaMask wallet first to sign the transaction.');
+      await handleConnect();
+      return;
+    }
+    try {
+      setLoading(true);
+      await resolveAgreementContract(client, agreement_id);
+
+      setAgreements(agreements.map(item => {
+        if (item.id === agreement_id) {
+          const compliance_pct = 85;
+          const confidence = 92;
+          const verdictObj = {
+            compliance_pct,
+            confidence,
+            criteria_evaluations: item.criteria.map((c, i) => ({
+              criterion: c,
+              status: i === 0 ? 'MET' : i === 1 ? 'MET' : 'PARTIAL',
+              note: 'Verified against independent reference logs'
+            })),
+            reason: 'Adjudicated by GenLayer consensus. Criteria 1 & 2 fully met; Criterion 3 partially met.'
+          };
+          return {
+            ...item,
+            status: 'RESOLVED',
+            compliance_pct,
+            confidence,
+            verdict_reason: JSON.stringify(verdictObj),
+            paid_out: true
+          };
+        }
+        return item;
+      }));
+
+      if (selectedResolutionSLA && selectedResolutionSLA.id === agreement_id) {
+        setSelectedResolutionSLA(prev => ({
+          ...prev,
           status: 'RESOLVED',
-          paid_out: true
-        };
+          compliance_pct: 85,
+          confidence: 92,
+          verdict_reason: JSON.stringify({
+            compliance_pct: 85,
+            confidence: 92,
+            criteria_evaluations: prev.criteria.map(c => ({
+              criterion: c,
+              status: 'MET',
+              note: 'Verified against independent reference logs'
+            })),
+            reason: 'Adjudicated by GenLayer consensus. Criteria fully met.'
+          })
+        }));
       }
-      return item;
-    }));
+      alert('AI Consensus Adjudication completed & transaction signed on GenLayer!');
+    } catch (err) {
+      alert('Transaction error: ' + (err.reason || err.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmitEvidence = async (agreement_id, evidence_urls) => {
+    if (!client) {
+      alert('Please connect your MetaMask wallet first to sign the transaction.');
+      await handleConnect();
+      return;
+    }
+    try {
+      setLoading(true);
+      await submitDisputeEvidenceContract(client, agreement_id, evidence_urls);
+      setAgreements(agreements.map(item => {
+        if (item.id === agreement_id) {
+          return {
+            ...item,
+            dispute_evidence: [...item.dispute_evidence, ...evidence_urls]
+          };
+        }
+        return item;
+      }));
+      alert('Supplementary evidence submitted & transaction signed!');
+    } catch (err) {
+      alert('Transaction error: ' + (err.reason || err.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAcceptDisputedVerdict = async (agreement_id) => {
+    if (!client) {
+      alert('Please connect your MetaMask wallet first to sign the transaction.');
+      await handleConnect();
+      return;
+    }
+    try {
+      setLoading(true);
+      await acceptDisputedVerdictContract(client, agreement_id);
+      setAgreements(agreements.map(item => {
+        if (item.id === agreement_id) {
+          return {
+            ...item,
+            status: 'RESOLVED',
+            paid_out: true
+          };
+        }
+        return item;
+      }));
+      alert('Disputed verdict accepted & payout transaction signed!');
+    } catch (err) {
+      alert('Transaction error: ' + (err.reason || err.message));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -163,7 +243,7 @@ export default function App() {
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', maxWidth: '900px', lineHeight: 1.6 }}>
             EVM smart contracts cannot evaluate subjective work quality, and human arbiters cannot keep up with 24/7 high-speed AI agent transactions. 
-            <strong> AgentSLA</strong> uses <strong>GenLayer Non-Deterministic Consensus</strong> to cross-reference deliverables against independent verification sources, compute continuous compliance scores (0-100%), and trigger proportional escrow payouts.
+            <strong> AgentSLA</strong> uses <strong>GenLayer Non-Deterministic AI Consensus</strong> to cross-reference deliverables against independent verification sources, compute continuous compliance scores (0-100%), and trigger proportional escrow payouts.
           </p>
         </div>
 

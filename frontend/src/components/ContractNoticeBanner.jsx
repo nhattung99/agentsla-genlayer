@@ -18,17 +18,17 @@ export default function ContractNoticeBanner({ isConfigured, customAddress, onSe
       <AlertTriangle size={24} color="var(--accent-amber)" style={{ flexShrink: 0, marginTop: '2px' }} />
       <div style={{ flex: 1 }}>
         <h4 style={{ color: 'var(--accent-amber)', fontSize: '1rem', fontWeight: 700, marginBottom: '0.25rem' }}>
-          Contract Chưa Đóng Cấu Hình Môi Trường (Chờ Deploy Thủ Công trên Studio)
+          Contract Address Unconfigured (Interactive Preview Mode)
         </h4>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-          Ứng dụng đang ở chế độ xem trước dữ liệu mẫu. Sau khi bạn deploy 3 contract (<code>SLACourt</code>, <code>Treasury</code>, <code>Reputation</code>) thành công trên <strong>GenLayer Studio (studionet)</strong>, hãy điền địa chỉ contract bên dưới để kết nối trực tiếp:
+          The application is operating in interactive preview mode. Once your <code>SLACourt</code> contract is deployed on <strong>GenLayer Studio (studionet)</strong>, enter its address below or set environment variables:
         </p>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', maxWidth: '600px' }}>
           <div style={{ position: 'relative', flex: 1 }}>
             <Terminal size={16} color="var(--text-subtle)" style={{ position: 'absolute', left: '12px', top: '10px' }} />
             <input
               type="text"
-              placeholder="0x... (Địa chỉ SLACourt đã deploy)"
+              placeholder="0x... (Deployed SLACourt contract address)"
               value={customAddress}
               onChange={(e) => onSetCustomAddress(e.target.value)}
               style={{
