@@ -68,14 +68,16 @@ class SLACourt(gl.Contract):
     owner: Address
 
     def __init__(self):
-        self.owner = gl.message.sender
+        self.owner = Address("0x0000000000000000000000000000000000000000")
         self.agreement_counter = bigint(0)
         self.treasury_address = Address("0x0000000000000000000000000000000000000000")
         self.reputation_address = Address("0x0000000000000000000000000000000000000000")
 
     @gl.public.write
     def set_config(self, treasury_address: Address, reputation_address: Address) -> None:
-        if gl.message.sender != self.owner:
+        if self.owner == Address("0x0000000000000000000000000000000000000000"):
+            self.owner = gl.message.sender
+        elif gl.message.sender != self.owner:
             raise UserError("Only owner can set contract configuration")
         self.treasury_address = treasury_address
         self.reputation_address = reputation_address

@@ -14,12 +14,14 @@ class Treasury(gl.Contract):
     owner: Address
 
     def __init__(self):
-        self.owner = gl.message.sender
+        self.owner = Address("0x0000000000000000000000000000000000000000")
         self.court_address = Address("0x0000000000000000000000000000000000000000")
 
     @gl.public.write
     def set_court_address(self, court_address: Address) -> None:
-        if gl.message.sender != self.owner and self.court_address != Address("0x0000000000000000000000000000000000000000"):
+        if self.owner == Address("0x0000000000000000000000000000000000000000"):
+            self.owner = gl.message.sender
+        elif gl.message.sender != self.owner:
             raise UserError("Only owner can set court address")
         self.court_address = court_address
 
