@@ -5,6 +5,19 @@
 
 ---
 
+## Deployed Contract (`studionet`)
+- **SLACourt Address:** `0x7fab008Bb711E3e8eF7d34182D1A235f63407E8f`
+- **GenLayer Explorer Link:** [https://genlayer-explorer.vercel.app/address/0x7fab008Bb711E3e8eF7d34182D1A235f63407E8f](https://genlayer-explorer.vercel.app/address/0x7fab008Bb711E3e8eF7d34182D1A235f63407E8f)
+- **Treasury Address:** `0x3FE2E18a4B139520A68E4236A5da58A32B0aAadB`
+- **Reputation Address:** `0xB3814Ec61b8662cAC514f9dEFf4b938C08E89cF7`
+
+---
+
+## Live App
+- **Live Production Application:** (Updating after Vercel deployment)
+
+---
+
 ## 1. Problem & Solution
 
 ### The Challenge in the AI Agent Economy
@@ -54,11 +67,15 @@ As autonomous AI agents transact with one another (Agent A hiring Agent B for co
 Leader & validator consensus in `SLACourt` uses GenLayer's non-deterministic framework:
 ```python
 def validator_fn(leader_res) -> bool:
-    if not isinstance(leader_res, gl.vm.Return):
+    leader_val_dict = getattr(leader_res, 'value', leader_res)
+    if not isinstance(leader_val_dict, dict) or "compliance_pct" not in leader_val_dict:
         return False
-    my_res = leader_fn()
+    try:
+        my_res = leader_fn()
+    except Exception:
+        return False
     # Continuous compliance tolerance check (±5%) ignoring freeform reasoning text
-    return abs(my_res["compliance_pct"] - leader_res.value["compliance_pct"]) <= 5
+    return abs(my_res["compliance_pct"] - leader_val_dict["compliance_pct"]) <= 5
 ```
 
 > **Why ±5% Continuous Tolerance?**  
@@ -98,20 +115,4 @@ npm run dev
 ```bash
 cd frontend
 npm run build
-```
-
----
-
-## 6. GenLayer Studio Deployment Registry (`studionet`)
-
-1. Open [GenLayer Studio](https://studio.genlayer.com) on `studionet`.
-2. Deploy `Treasury` -> Note address.
-3. Deploy `Reputation` -> Note address.
-4. Deploy `SLACourt` passing `Treasury` & `Reputation` addresses.
-5. Authorize `SLACourt` via `set_court_address()` on `Treasury` and `Reputation`.
-
-```env
-VITE_CONTRACT_SLA_COURT=0x...
-VITE_CONTRACT_TREASURY=0x...
-VITE_CONTRACT_REPUTATION=0x...
 ```
