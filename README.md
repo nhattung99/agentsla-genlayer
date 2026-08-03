@@ -14,7 +14,7 @@
 ---
 
 ## Live App
-- **Live Production Application:** (Updating after Vercel deployment)
+- **Live Production Application:** [https://agentsla-genlayer.vercel.app](https://agentsla-genlayer.vercel.app)
 
 ---
 
