@@ -1,6 +1,13 @@
 # v0.2.16
-from genlayer import *
+# {
+#   "Seq": [
+#     { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
+#   ]
+# }
+
 import json
+from dataclasses import dataclass
+from genlayer import *
 
 @allow_storage
 @dataclass
@@ -21,45 +28,50 @@ class SLAAgreement:
     paid_out: bool
 
 def _parse_verdict_json(raw_text: str) -> dict:
-    """Helper to clean markdown fences and parse LLM JSON verdict."""
     cleaned = raw_text.strip()
     if cleaned.startswith("```"):
         lines = cleaned.splitlines()
-        if len(lines) >= 2:
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            cleaned = "\n".join(lines).strip()
+        if len(lines) >= 2 and lines[0].startswith("```"):
+            lines = lines[1:]
+        if len(lines) >= 1 and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+    
     try:
         data = json.loads(cleaned)
-        if "compliance_pct" not in data or "confidence" not in data:
-            raise UserError("LLM response missing compliance_pct or confidence keys")
-        
-        # Ensure values are within bounds
-        compliance = int(data["compliance_pct"])
-        confidence = int(data["confidence"])
-        compliance = max(0, min(100, compliance))
-        confidence = max(0, min(100, confidence))
-        
-        data["compliance_pct"] = compliance
-        data["confidence"] = confidence
-        return data
     except Exception as e:
-        raise UserError(f"Failed to parse LLM adjudication JSON: {str(e)}")
+        raise UserError(f"Invalid JSON returned by AI arbitrator: {str(e)}")
 
-class Contract(gl.Contract):
+    if "compliance_pct" not in data or "confidence" not in data:
+        raise UserError("Missing required keys in AI verdict response JSON")
+
+    pct = int(data["compliance_pct"])
+    conf = int(data["confidence"])
+
+    if pct < 0 or pct > 100:
+        raise UserError(f"compliance_pct out of bounds: {pct}")
+    if conf < 0 or conf > 100:
+        raise UserError(f"confidence out of bounds: {conf}")
+
+    return {
+        "compliance_pct": pct,
+        "confidence": conf,
+        "criteria_evaluations": data.get("criteria_evaluations", []),
+        "reason": str(data.get("reason", "")),
+    }
+
+class SLACourt(gl.Contract):
     agreements: TreeMap[str, SLAAgreement]
     agreement_counter: bigint
     treasury_address: Address
     reputation_address: Address
     owner: Address
 
-    def __init__(self, owner: Address, treasury_address: Address, reputation_address: Address):
-        self.owner = owner
+    def __init__(self):
+        self.owner = gl.message.sender
         self.agreement_counter = bigint(0)
-        self.treasury_address = treasury_address
-        self.reputation_address = reputation_address
+        self.treasury_address = Address("0x0000000000000000000000000000000000000000")
+        self.reputation_address = Address("0x0000000000000000000000000000000000000000")
 
     @gl.public.write
     def set_config(self, treasury_address: Address, reputation_address: Address) -> None:
@@ -77,13 +89,15 @@ class Contract(gl.Contract):
         payment_amount: bigint,
         deadline: u256
     ) -> str:
-        if len(criteria) == 0:
-            raise UserError("SLA agreement must contain at least one criterion")
-        if payment_amount <= bigint(0):
+        payment_val = gl.message.value if gl.message.value > bigint(0) else payment_amount
+        if payment_val <= bigint(0):
             raise UserError("Payment amount must be greater than zero")
 
+        if len(criteria) == 0:
+            raise UserError("SLA agreement must contain at least one criterion")
+
+        self.agreement_counter += bigint(1)
         agreement_id = str(self.agreement_counter)
-        self.agreement_counter = self.agreement_counter + bigint(1)
 
         empty_urls = DynArray[str]()
         empty_evidence = DynArray[str]()
@@ -93,7 +107,7 @@ class Contract(gl.Contract):
             provider=provider,
             task_description=task_description,
             criteria=criteria,
-            payment_amount=payment_amount,
+            payment_amount=payment_val,
             deadline=deadline,
             deliverable_urls=empty_urls,
             reference_urls=empty_urls,
@@ -109,7 +123,7 @@ class Contract(gl.Contract):
 
         # Deposit escrow to treasury contract
         if self.treasury_address != Address("0x0000000000000000000000000000000000000000"):
-            gl.get_contract_at(self.treasury_address).deposit(agreement_id, payment_amount)
+            gl.get_contract_at(self.treasury_address).deposit(agreement_id, payment_val)
 
         return agreement_id
 
@@ -189,16 +203,36 @@ class Contract(gl.Contract):
 
         # Read state before non-deterministic execution
         task_desc = agreement.task_description
-        criteria_list = list(agreement.criteria)
-        deliv_urls = list(agreement.deliverable_urls)
-        ref_urls = list(agreement.reference_urls)
-        dispute_urls = list(agreement.dispute_evidence)
+        criteria_list = [str(c) for c in agreement.criteria]
+        deliv_urls = [str(u) for u in agreement.deliverable_urls]
+        ref_urls = [str(u) for u in agreement.reference_urls]
+        dispute_urls = [str(u) for u in agreement.dispute_evidence]
 
         # Leader evaluation logic
         def leader_fn() -> dict:
-            deliverable_contents = [gl.nondet.web.render(u) for u in deliv_urls]
-            reference_contents = [gl.nondet.web.render(u) for u in ref_urls]
-            evidence_contents = [gl.nondet.web.render(u) for u in dispute_urls] if dispute_urls else []
+            deliverable_contents = []
+            for u in deliv_urls:
+                try:
+                    res = gl.nondet.web.render(u)
+                    deliverable_contents.append(str(res))
+                except Exception as e:
+                    raise UserError(f"Failed to render deliverable URL '{u}': {str(e)}")
+
+            reference_contents = []
+            for u in ref_urls:
+                try:
+                    res = gl.nondet.web.render(u)
+                    reference_contents.append(str(res))
+                except Exception as e:
+                    raise UserError(f"Failed to render reference URL '{u}': {str(e)}")
+
+            evidence_contents = []
+            for u in dispute_urls:
+                try:
+                    res = gl.nondet.web.render(u)
+                    evidence_contents.append(str(res))
+                except Exception as e:
+                    raise UserError(f"Failed to render dispute evidence URL '{u}': {str(e)}")
 
             prompt = f"""You are a neutral, objective AI SLA (Service Level Agreement) Adjudicator on GenLayer.
 Your task is to evaluate whether Provider (Agent B) has fulfilled the SLA criteria for Client (Agent A).
@@ -224,40 +258,28 @@ INSTRUCTIONS:
 3. Calculate an overall compliance percentage (0 to 100).
 4. Assign a confidence score (0 to 100) reflecting how verifiable and complete the provided evidence is.
 5. Return ONLY a single raw JSON object (no markdown formatting, no code fences ```json):
-{{
-  "compliance_pct": <number 0-100>,
-  "confidence": <number 0-100>,
-  "criteria_evaluations": [
-    {{"criterion": "<criterion text>", "status": "MET|PARTIAL|NOT_MET", "note": "<brief reason>"}}
-  ],
-  "reason": "<overall summary verdict>"
-}}"""
+{{"compliance_pct": <number 0-100>, "confidence": <number 0-100>, "criteria_evaluations": [{{"criterion": "...", "status": "MET|PARTIAL|NOT_MET", "note": "..."}}], "reason": "<overall summary verdict>"}}"""
             raw_response = gl.nondet.exec_prompt(prompt)
             return _parse_verdict_json(raw_response)
 
-        # Validator consensus logic:
-        # Note: We use a +/- 5% tolerance on compliance_pct continuously.
-        # Reasoning text and criteria_evaluations details are ignored in validator comparison
-        # to ensure high consensus convergence across independent AI node executions.
+        # Validator consensus logic with safe leader extraction
         def validator_fn(leader_res) -> bool:
-            if not isinstance(leader_res, gl.vm.Return):
+            leader_val_dict = getattr(leader_res, 'value', leader_res)
+            if not isinstance(leader_val_dict, dict) or "compliance_pct" not in leader_val_dict:
                 return False
             try:
                 my_res = leader_fn()
             except Exception:
                 return False
 
-            leader_pct = int(leader_res.value["compliance_pct"])
-            validator_pct = int(my_res["compliance_pct"])
-            return abs(validator_pct - leader_pct) <= 5
+            leader_val = leader_val_dict["compliance_pct"]
+            my_val = my_res["compliance_pct"]
+            return abs(my_val - leader_val) <= 5
 
         verdict = gl.vm.run_nondet(leader_fn, validator_fn)
 
         compliance_pct = u256(verdict.get("compliance_pct", 0))
         confidence = u256(verdict.get("confidence", 0))
-        reason = verdict.get("reason", "Adjudicated by GenLayer AI Consensus")
-
-        # Format full verdict JSON string for UI criteria breakdown display
         verdict_str = json.dumps(verdict)
 
         # Low confidence (<60%) routes to DISPUTED status instead of premature payout
@@ -278,7 +300,6 @@ INSTRUCTIONS:
         self.agreements[agreement_id] = agreement
 
         # Calculate proportional payouts using bigint math
-        # payout = payment * compliance_pct / 100
         payment = agreement.payment_amount
         payout_amount = (payment * bigint(compliance_pct)) // bigint(100)
         refund_amount = payment - payout_amount
@@ -327,11 +348,27 @@ INSTRUCTIONS:
             gl.get_contract_at(self.reputation_address).record_sla_result(agreement.client, compliance_pct)
 
     @gl.public.view
-    def get_agreement(self, agreement_id: str) -> SLAAgreement:
+    def get_agreement(self, agreement_id: str) -> dict:
         if agreement_id not in self.agreements:
-            raise UserError("Agreement ID does not exist")
-        return self.agreements[agreement_id]
+            return {}
+        a = self.agreements[agreement_id]
+        return {
+            "client": str(a.client),
+            "provider": str(a.provider),
+            "task_description": str(a.task_description),
+            "criteria": [str(c) for c in a.criteria],
+            "payment_amount": str(a.payment_amount),
+            "deadline": int(a.deadline),
+            "deliverable_urls": [str(u) for u in a.deliverable_urls],
+            "reference_urls": [str(u) for u in a.reference_urls],
+            "status": str(a.status),
+            "compliance_pct": int(a.compliance_pct),
+            "verdict_reason": str(a.verdict_reason),
+            "confidence": int(a.confidence),
+            "dispute_evidence": [str(e) for e in a.dispute_evidence],
+            "paid_out": bool(a.paid_out)
+        }
 
     @gl.public.view
-    def get_agreement_count(self) -> bigint:
-        return self.agreement_counter
+    def get_agreement_count(self) -> str:
+        return str(self.agreement_counter)
